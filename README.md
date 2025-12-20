@@ -1,6 +1,27 @@
 # Distributed-Cache-System
 
-### Architecture Design
+## FlashCache: 700k+ RPS High-Frequency Key-Value Store
+
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen) ![Language](https://img.shields.io/badge/language-C%2B%2B20-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+
+FlashCache is a single-threaded, event-driven key-value store engineered for **ultra-low latency** and **high throughput**. 
+
+Built from scratch in C++20, it leverages **kernel-bypass concepts (Epoll)** and **custom memory allocation (Arena)** to process over **763,000 requests per second** on a single core—outperforming standard Redis (~100k RPS) by **7x** on local benchmarks.
+
+## Performance Benchmarks
+
+**Environment:** Fedora Linux, Single Core, 10-command Pipeline.
+
+| Metric | FlashCache | Standard Redis | Improvement |
+| :--- | :--- | :--- | :--- |
+| **Throughput** | **763,358 RPS** | ~110,000 RPS | **7x** |
+| **P50 Latency** | **0.32ms** | 0.90ms | **60% Lower** |
+
+ 
+![Benchmark](/docs/benchmark_test.png)
+> *Screenshot: `redis-benchmark -p 6379 -P 10 -t set,get -n 10000 -q` running against FlashCache.*
+
+## Core Architecture
 
 ```mermaid
 
@@ -80,3 +101,56 @@ flowchart LR
 
 
 ```
+
+### 1. Single-Threaded Event Loop (Epoll)
+
+Instead of thread-per-client (Apache style), FlashCache uses Linux Epoll in Edge-Triggered mode.
+
+- Benefit: Zero context-switching overhead.
+- Why: Locks (std::mutex) kill latency. By serializing execution on one core, we keep the CPU instruction cache hot.
+
+### 2. Custom Linear Arena Allocator
+
+Standard malloc is non-deterministic and causes heap fragmentation.
+
+- Solution: A pre-allocated 64MB Arena.
+- Mechanism: Allocation is a simple pointer increment.
+- Result: Elimination of malloc overhead on the hot path.
+
+### 3. Zero-Copy RESP Parser
+Standard parsers copy bytes into std::string objects.
+
+- Solution: A custom parser using std::string_view.
+- Benefit: Zero heap allocations during packet processing. We strictly point to the raw read buffer.
+
+## Build and Run
+
+Requirements: Linux, C++20 Compiler (GCC/Clang), CMake.
+```bash
+#1. Clone
+git clone https://github.com/Sudhanshu-S3/Distributed-Cache-System.git
+cd Distributed-Cache-System
+
+# 2. Build (Release Mode for Max Speed)
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make
+
+# 3. Run Server
+./flash_cache
+
+```
+
+## Testing
+Unit tests are implemented using Google Test to ensure reliability of the Arena allocator and Parser logic.
+
+```bash
+# Run the test suite
+./flash_test
+```
+
+## Future Roadmap
+
+- Slab Allocation: Upgrade Arena to allow freeing memory (Bitmap-based reuse).
+- Snapshotting: Asynchronous persistence (RDB style) using fork().
+- Cluster Mode: Consistent Hashing for horizontal scaling.
